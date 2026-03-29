@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Converted from FR5.urdf with PD control actuators for MuJoCo -->
+<mujoco model="fr5_robot">
+  <compiler angle="radian" inertiafromgeom="false" />
+
+  <option timestep="0.001" iterations="50" solver="Newton" tolerance="1e-10">
+    <flag warmstart="enable" />
+  </option>
+
+  <default>
+    <default class="robot">
+      <joint damping="0.5" armature="0.01" frictionloss="0.01" />
+      <default class="visual">
+        <geom material="visualgeom" contype="0" conaffinity="0" group="2" />
+      </default>
+      <default class="collision">
+        <geom material="collision_material" condim="3" contype="1" conaffinity="1" priority="1" group="3"
+              solref="0.01 1" solimp="0.95 0.99 0.001" friction="1 0.005 0.0001" />
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="visualgeom" rgba="0.89804 0.91765 0.92941 1" />
+    <material name="collision_material" rgba="1.0 0.28 0.1 0.3" />
+    <mesh name="base_link.STL"              file="../meshes/FR5/base_link.STL" />
+    <mesh name="shoulder_link.STL"          file="../meshes/FR5/shoulder_link.STL" />
+    <mesh name="upperarm_link.STL"          file="../meshes/FR5/upperarm_link.STL" />
+    <mesh name="forearm_link.STL"           file="../meshes/FR5/forearm_link.STL" />
+    <mesh name="wrist1_link.STL"            file="../meshes/FR5/wrist1_link.STL" />
+    <mesh name="wrist2_link.STL"            file="../meshes/FR5/wrist2_link.STL" />
+    <mesh name="wrist3_link.STL"            file="../meshes/FR5/wrist3_link.STL" />
+    <mesh name="hand_link.STL"              file="../meshes/FR5/hand_link.STL" />
+    <mesh name="hand_thumb_finger_link.STL" file="../meshes/FR5/hand_thumb_finger_link.STL" />
+    <mesh name="hand_index_finger_link.STL" file="../meshes/FR5/hand_index_finger_link.STL" />
+  </asset>
+
+  <worldbody>
+    <body name="base_link" pos="0 0 0" quat="1 0 0 0" childclass="robot">
+      <!-- mass=1.62 kg -->
+      <inertial pos="-0.00044457 0.0004811 0.032592" mass="1.62"
+                fullinertia="0.0024567 0.0024575 0.0038879 -1.5435e-05 -1.3507e-05 1.4421e-05" />
+      <geom name="base_link_collision" pos="0 0 0" type="mesh" mesh="base_link.STL" class="collision" />
+      <geom name="base_link_visual"    pos="0 0 0" type="mesh" mesh="base_link.STL" class="visual" />
+
+      <!-- j1: base_link -> shoulder_link, axis z, +-3.054 rad -->
+      <body name="shoulder_link" pos="0 0 0">
+        <joint name="j1" type="hinge" pos="0 0 0" axis="0 0 1"
+               range="-3.0543261 3.0543261" damping="1.0" armature="0.02" />
+        <!-- mass=4.38 kg -->
+        <inertial pos="1.3785e-06 -0.0031495 0.14526" mass="4.38"
+                  fullinertia="0.010397 0.010278 0.0076307 -1.005e-08 1.6274e-07 1.5856e-04" />
+        <geom name="shoulder_link_collision" pos="0 0 0" type="mesh" mesh="shoulder_link.STL" class="collision" />
+        <geom name="shoulder_link_visual"    pos="0 0 0" type="mesh" mesh="shoulder_link.STL" class="visual" />
+
+        <!-- j2: shoulder_link -> upperarm_link, xyz="0 0 0.152", rpy="1.5708 0 0" -->
+        <body name="upperarm_link" pos="0 0 0.152" euler="1.5708 0 0">
+          <joint name="j2" type="hinge" pos="0 0 0" axis="0 0 1"
+                 range="-4.6251225 1.4835298" damping="3.0" armature="0.05" />
+          <!-- mass=14.46 kg -->
+          <inertial pos="-2.2928e-05 0.33278 0.084237" mass="14.46"
+                    fullinertia="2.9074 0.12653 2.8157 -2.3104e-04 -2.5049e-05 -0.1479" />
+          <geom name="upperarm_link_collision" pos="0 0 0" type="mesh" mesh="upperarm_link.STL" class="collision" />
+          <geom name="upperarm_link_visual"    pos="0 0 0" type="mesh" mesh="upperarm_link.STL" class="visual" />
+
+          <!-- j3: upperarm_link -> forearm_link, xyz="-0.425 0 0", rpy="0 0 0" -->
+          <body name="forearm_link" pos="-0.425 0 0" euler="0 0 0">
+            <joint name="j3" type="hinge" pos="0 0 0" axis="0 0 1"
+                   range="-2.8274333 2.8274333" damping="2.0" armature="0.03" />
+            <!-- mass=7.67 kg -->
+            <inertial pos="0.092224 -2.2928e-05 0.084237" mass="7.67"
+                      fullinertia="0.12653 2.9074 2.8157 2.3104e-04 0.1479 -2.5049e-05" />
+            <geom name="forearm_link_collision" pos="0 0 0" type="mesh" mesh="forearm_link.STL" class="collision" />
+            <geom name="forearm_link_visual"    pos="0 0 0" type="mesh" mesh="forearm_link.STL" class="visual" />
+
+            <!-- j4: forearm_link -> wrist1_link, xyz="-0.39501 0 0", rpy="0 0 0" -->
+            <body name="wrist1_link" pos="-0.39501 0 0" euler="0 0 0">
+              <joint name="j4" type="hinge" pos="0 0 0" axis="0 0 1"
+                     range="-4.6251225 1.4835298" damping="0.5" armature="0.01" />
+              <!-- mass=1.63 kg -->
+              <inertial pos="0.48722 -2.2928e-05 0.084237" mass="1.63"
+                        fullinertia="0.12653 2.9074 2.8157 2.3104e-04 0.1479 -2.5049e-05" />
+              <geom name="wrist1_link_collision" pos="0 0 0" type="mesh" mesh="wrist1_link.STL" class="collision" />
+              <geom name="wrist1_林肯_visual"    pos="0 0 0" type="mesh" mesh="wrist1_link.STL" class="visual" />
+
+              <!-- j5: wrist1_link -> wrist2_link, xyz="0 0 0.1021", rpy="1.5708 0 0" -->
+              <body name="wrist2_link" pos="0 0 0.1021" euler="1.5708 0 0">
+                <joint name="j5" type="hinge" pos="0 0 0" axis="0 0 1"
+                       range="-3.0543261 3.0543261" damping="0.5" armature="0.01" />
+                <!-- mass=1.58 kg -->
+                <inertial pos="-2.396e-06 0.0045906 0.099342" mass="1.58"
+                          fullinertia="0.0022393 0.0013914 0.0021864 -1.0022e-07 -3.2115e-08 -2.2223e-05" />
+                <geom name="wrist2_link_collision" pos="0 0 0" type="mesh" mesh="wrist2_link.STL" class="collision" />
+                <geom name="wrist2_link_visual"    pos="0 0 0" type="mesh" mesh="wrist2_link.STL" class="visual" />
+
+                <!-- j6: wrist2_link -> wrist3_link, xyz="0 0 0.102", rpy="-1.5708 0 0" -->
+                <body name="wrist3_link" pos="0 0 0.102" euler="-1.5708 0 0">
+                  <joint name="j6" type="hinge" pos="0 0 0" axis="0 0 1"
+                         range="-3.0543261 3.0543261" damping="0.5" armature="0.01" />
+                  <!-- mass=0.53 kg -->
+                  <inertial pos="5.8427e-06 7.5807e-05 0.079126" mass="0.53"
+                            fullinertia="2.7801e-04 2.7736e-04 4.1582e-04 -3.5346e-07 -1.7431e-07 -7.5888e-08" />
+                  <geom name="wrist3_link_collision" pos="0 0 0" type="mesh" mesh="wrist3_link.STL" class="collision" />
+                  <geom name="wrist3_link_visual"    pos="0 0 0" type="mesh" mesh="wrist3_link.STL" class="visual" />
+
+                  <!-- Hand base (lt) link -->
+                  <body name="lt" pos="0 0 0.102" euler="-1.5708 0 3.14159 0">
+                    <inertial pos="0 0 0" mass="0.00155862265526226"
+                              fullinertia="9.71784989903361e-08 9.71784989903361e-08 1.93317916210497e-07 0 0 0" />
+                    <geom name="lt_visual" type="mesh" mesh="hand_link.STL" class="visual" />
+
+                    <!-- End-effector site at gripper center -->
+                    <site name="end_effector_site" pos="0 0 0.3327" quat="1 0 0 0" />
+
+                    <!-- Left thumb finger: prismatic, axis +y -->
+                    <body name="left_thumb_link" pos="0.0474 -0.21704 0" euler="0 -0.13915 -1.5708">
+                      <joint name="fl_joint8" type="slide" pos="0 0 0" axis="0 1 0"
+                             range="-0.0475 0" damping="10.0" armature="0.001" />
+                      <inertial pos="-0.0100377759520469 0.00888929817910186 0.00140582863662075" mass="0.0107852243832854"
+                                fullinertia="6.56865819191575e-07 9.91281989380474e-07 9.77101675679216e-07 1.26483874675662e-07 4.57475789846971e-08 -1.77145461006273e-08" />
+                      <geom name="left_thumb_collision" type="mesh" mesh="hand_thumb_finger_link.STL" class="collision" />
+                      <geom name="left_thumb_visual"    type="mesh" mesh="hand_thumb_finger_link.STL" class="visual" />
+                    </body>
+
+                    <!-- Left index finger: prismatic, axis +y -->
+                    <body name="left_index_finger_link" pos="-0.0476 -0.21704 0" euler="0 -0.13915 -1.5708">
+                      <joint name="fl_joint7" type="slide" pos="0 0 0" axis="0 1 0"
+                             range="0 0.0475" damping="10.0" armature="0.001" />
+                      <inertial pos="-0.0100377759676578 -0.00888929814140482 0.00140582851332094" mass="0.0107852243832852"
+                                fullinertia="6.56865823706206e-07 9.9128198938046e-07 9.77101671164545e-07 -1.26483874668648e-07 4.57475947860924e-08 1.7714546150798e-08" />
+                      <geom name="left_index_collision" type="mesh" mesh="hand_index_finger_link.STL" class="collision" />
+                      <geom name="left_index_visual"    type="mesh" mesh="hand_index_finger_link.STL" class="visual" />
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+
+      <site name="base_site" pos="0 0 0" quat="1 0 0 0" />
+      <camera name="front_camera" mode="track" fovy="60" pos="0.0 2.0 1.0" xyaxes="1 0 0 0 0.5 0.866" />
+      <camera name="side_camera"  mode="track" fovy="60" pos="-2.0 0.0 1.0" xyaxes="0 -1 0 0 0 1" />
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- PD position control for j1-j6 -->
+    <!-- kp proportional to effort limits: j1-j3 effort=150, j4-j6 effort=28 -->
+    <position name="j1_ctrl" joint="j1" kp="500" ctrllimited="true" ctrlrange="-3.0543261 3.0543261" />
+    <position name="j2_ctrl" joint="j2" kp="500" ctrllimited="true" ctrlrange="-4.6251225 1.4835298" />
+    <position name="j3_ctrl" joint="j3" kp="300" ctrllimited="true" ctrlrange="-2.8274333 2.8274333" />
+    <position name="j4_ctrl" joint="j4" kp="100" ctrllimited="true" ctrlrange="-4.6251225 1.4835298" />
+    <position name="j5_ctrl" joint="j5" kp="100" ctrllimited="true" ctrlrange="-3.0543261 3.0543261" />
+    <position name="j6_ctrl" joint="j6" kp="100" ctrllimited="true" ctrlrange="-3.0543261 3.0543261" />
+    <!-- Position control for gripper fingers -->
+    <position name="left_finger_ctrl"  joint="fl_joint8" kp="200" ctrllimited="true" ctrlrange="-0.0475 0" />
+    <position name="right_finger_ctrl" joint="fl_joint7" kp="200" ctrllimited="true" ctrlrange="0 0.0475" />
+  </actuator>
+
+  <!-- Symmetric gripper: both fingers move together -->
+  <equality>
+    <joint joint1="fl_joint8" joint2="fl_joint7" polycoef="0 -1 0 0 0" />
+  </equality>
+
+  <contact>
+    <exclude body1="base_link"     body2="shoulder_link" />
+    <exclude body1="shoulder_link" body2="upperarm_link" />
+    <exclude body1="upperarm_link" body2="forearm_link" />
+    <exclude body1="forearm_link"  body2="wrist1_link" />
+    <exclude body1="wrist1_link"   body2="wrist2_link" />
+    <exclude body1="wrist2_link"   body2="wrist3_link" />
+    <exclude body1="wrist3_link"   body2="lt" />
+    <exclude body1="lt"            body2="left_thumb_link" />
+    <exclude body1="lt"            body2="left_index_finger_link" />
+  </contact>
+
+  <sensor>
+    <framepos    name="ee_pos"    objtype="site" objname="end_effector_site" />
+    <framequat   name="ee_quat"   objtype="site" objname="end_effector_site" />
+    <framelinvel name="ee_linvel" objtype="site" objname="end_effector_site" />
+    <frameangvel name="ee_angvel" objtype="site" objname="end_effector_site" />
+  </sensor>
+</mujoco>
