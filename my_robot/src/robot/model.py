@@ -83,6 +83,25 @@ def _require_frame_id(model, candidates):
     raise ValueError(f"Could not find any frame in {candidates}")
 
 
+def _skew(p: np.ndarray) -> np.ndarray:
+    return np.array([
+        [0.0, -p[2], p[1]],
+        [p[2], 0.0, -p[0]],
+        [-p[1], p[0], 0.0],
+    ])
+
+
+def _adjoint_vw(T: np.ndarray) -> np.ndarray:
+    """Adjoint for twists ordered as [v; omega]."""
+    R = T[:3, :3]
+    p = T[:3, 3]
+    A = np.zeros((6, 6))
+    A[:3, :3] = R
+    A[:3, 3:] = _skew(p) @ R
+    A[3:, 3:] = R
+    return A
+
+
 class Robot:
     """
     Mobile manipulator kinematic model using pinocchio.
@@ -90,8 +109,9 @@ class Robot:
     State representation:
       - Position (q_pos): [x, y, z, yaw, pitch, roll, j1..j6]  (12,)
         Base orientation as ZYX Euler angles (yaw=rot_z, pitch=rot_y, roll=rot_x).
-      - Velocity (q_vel): [vx, vy, vz, wx, wy, wz, dj1..dj6]   (12,)
-        Base velocity expressed in body frame (pinocchio FreeFlyer convention).
+      - Control velocity (q_vel): [wz, vx, dj1..dj6]   (8,)
+        This matches the reference project: only differential-drive base
+        yaw/forward velocities are optimized in WBC.
 
     Integration uses pinocchio's manifold integration (pin.integrate) for
     correct SO3 attitude update.
@@ -115,7 +135,10 @@ class Robot:
         # Mapping: our 12 velocity DOFs → columns in pinocchio v vector
         base_v_start = self._model.joints[self._base_jid].idx_v
         arm_v_cols = [self._model.joints[jid].idx_v for jid in self._arm_jids]
-        self._v_cols = list(range(base_v_start, base_v_start + 6)) + arm_v_cols
+        self._full_v_cols = list(range(base_v_start, base_v_start + 6)) + arm_v_cols
+        # Reference-style control space: [wz, vx, j1..j6]
+        self._control_cols = [5, 0, 6, 7, 8, 9, 10, 11]
+        self._v_cols = [self._full_v_cols[i] for i in self._control_cols]
 
         # Mapping: arm joint config indices in pinocchio q vector
         self._arm_q_cols = [self._model.joints[jid].idx_q for jid in self._arm_jids]
@@ -142,28 +165,28 @@ class Robot:
         self._mobile_base_fid = _require_frame_id(self._model, ['frankie_base0'])
         self._arm_base_fid = _require_frame_id(self._model, ['base_link', 'base_Link'])
 
-        # DOF
-        self._dof = 12
+        # WBC control DOF: [wz, vx, j1..j6]
+        self._dof = 8
 
         # Internal pinocchio state
         self._q_pin = pin.neutral(self._model)   # configuration (nq,)
         self._v_pin = np.zeros(self._model.nv)   # velocity     (nv,)
 
-        # Joint position limits [lower(12), upper(12)]
-        self._q_lim = np.zeros((2, 12))
-        self._q_lim[0, :6] = -1e6
-        self._q_lim[1, :6] = 1e6
+        # Joint position limits in reduced control space [wz, vx, j1..j6]
+        self._q_lim = np.zeros((2, self._dof))
+        self._q_lim[0, :2] = -1e6
+        self._q_lim[1, :2] = 1e6
         for i, jid in enumerate(self._arm_jids):
             qi = self._model.joints[jid].idx_q
-            self._q_lim[0, 6 + i] = self._model.lowerPositionLimit[qi]
-            self._q_lim[1, 6 + i] = self._model.upperPositionLimit[qi]
+            self._q_lim[0, 2 + i] = self._model.lowerPositionLimit[qi]
+            self._q_lim[1, 2 + i] = self._model.upperPositionLimit[qi]
 
-        # Joint velocity limits (12,)
-        self._qd_lim = np.zeros(12)
-        self._qd_lim[:6] = 2.0
+        # Joint velocity limits in reduced control space
+        self._qd_lim = np.zeros(self._dof)
+        self._qd_lim[:2] = 4.0
         for i, jid in enumerate(self._arm_jids):
             vi = self._model.joints[jid].idx_v
-            self._qd_lim[6 + i] = self._model.velocityLimit[vi]
+            self._qd_lim[2 + i] = self._model.velocityLimit[vi]
 
     # =====================================================================
     # Internal helpers
@@ -191,6 +214,23 @@ class Robot:
             pos[6 + i] = self._q_pin[qi]
         return pos
 
+    def _control_q_from_full(self, q_pos: np.ndarray) -> np.ndarray:
+        q_ctrl = np.zeros(self._dof)
+        q_ctrl[2:] = np.asarray(q_pos, dtype=float)[6:12]
+        return q_ctrl
+
+    def _reduced_qd_to_full(self, qd: np.ndarray) -> np.ndarray:
+        qd = np.asarray(qd, dtype=float)
+        if qd.shape[0] == 12:
+            return qd
+        if qd.shape[0] != self._dof:
+            raise ValueError(f"Expected qd length {self._dof} or 12, got {qd.shape[0]}")
+        qd_full = np.zeros(12)
+        qd_full[0] = qd[1]
+        qd_full[5] = qd[0]
+        qd_full[6:12] = qd[2:]
+        return qd_full
+
     # =====================================================================
     # State properties
     # =====================================================================
@@ -210,12 +250,14 @@ class Robot:
 
     @property
     def q_vel(self) -> np.ndarray:
-        """Velocity (body frame): [vx, vy, vz, wx, wy, wz, dj1..dj6]  (12,)"""
-        return self._v_pin[self._v_cols].copy()
+        """Reduced control velocity: [wz, vx, dj1..dj6]  (8,)"""
+        full_vel = self._v_pin[self._full_v_cols]
+        return full_vel[self._control_cols].copy()
 
     @q_vel.setter
     def q_vel(self, vel):
-        self._v_pin[self._v_cols] = vel
+        vel_full = self._reduced_qd_to_full(np.asarray(vel, dtype=float))
+        self._v_pin[self._full_v_cols] = vel_full
 
     @property
     def q(self) -> np.ndarray:
@@ -235,19 +277,18 @@ class Robot:
     # =====================================================================
 
     def integrate(self, qd: np.ndarray, dt: float):
-        """Integrate 12-DOF velocity via manifold integration.
+        """Integrate reduced WBC velocity via manifold integration.
 
         Uses pinocchio.integrate for correct SO3 attitude update:
             p_new = p + R * v_body * dt
             R_new = R * Exp(omega_body * dt)
 
         Args:
-            qd: (12,) velocity [vx, vy, vz, wx, wy, wz, dj1..dj6]
-                Base velocities in body frame.
+            qd: (8,) velocity [wz, vx, dj1..dj6] or full (12,) velocity
             dt: time step [s]
         """
         v = np.zeros(self._model.nv)
-        v[self._v_cols] = qd
+        v[self._full_v_cols] = self._reduced_qd_to_full(qd)
         self._q_pin = pin.integrate(self._model, self._q_pin, v * dt)
 
     # =====================================================================
@@ -293,25 +334,27 @@ class Robot:
         return np.linalg.inv(T_world_mobile_base) @ T_world_arm_base
 
     def jacobe(self, q_pos: np.ndarray) -> np.ndarray:
-        """Body Jacobian at end-effector (6×12), [v; omega] in EE local frame.
+        """Body Jacobian of the world EE pose in the EE local frame.
 
-        Maps [vx,vy,vz,wx,wy,wz,dj1..dj6] → EE velocity in end-effector frame.
+        This matches the reference project's convention: the returned Jacobian
+        maps [wz, vx, dj1..dj6] to the end-effector body twist
+        expressed in the end-effector frame, for the world-to-EE transform.
         """
         q_pin = self._q_pos_to_pin(np.asarray(q_pos, dtype=float))
         pin.computeJointJacobians(self._model, self._data, q_pin)
+        pin.forwardKinematics(self._model, self._data, q_pin)
         pin.updateFramePlacements(self._model, self._data)
-        J_full = pin.getFrameJacobian(
+        return pin.getFrameJacobian(
             self._model, self._data, self._ee_fid, pin.LOCAL
-        )
-        return J_full[:, self._v_cols]
+        )[:, self._v_cols]
 
     def jacob0(self, q_pos: np.ndarray, start: int = 0, end: int = -1) -> np.ndarray:
-        """Geometric Jacobian at end-effector in world-aligned frame (6×(12-start)).
+        """Geometric Jacobian at end-effector in world-aligned frame.
 
-        [v; omega] expressed at EE position aligned with world frame.
+        [v; omega] is expressed at the EE position aligned with world frame.
 
         Args:
-            q_pos: (12,) configuration
+            q_pos: (12,) full configuration
             start: first DOF index to include (0-based)
             end:   last DOF index (exclusive); -1 means all
         """
@@ -382,18 +425,19 @@ class Robot:
             gain:  constraint gain
 
         Returns:
-            Ain: (12, 12)
-            Bin: (12,)
+            Ain: (8, 8)
+            Bin: (8,)
         """
+        q_ctrl = self._control_q_from_full(q_pos)
         n = self._dof
         Ain = np.zeros((n, n))
         Bin = np.zeros(n)
         for i in range(n):
-            if q_pos[i] - self._q_lim[0, i] <= pi:
-                Bin[i] = -gain * ((self._q_lim[0, i] - q_pos[i]) + ps) / (pi - ps)
+            if q_ctrl[i] - self._q_lim[0, i] <= pi:
+                Bin[i] = -gain * ((self._q_lim[0, i] - q_ctrl[i]) + ps) / (pi - ps)
                 Ain[i, i] = -1
-            if self._q_lim[1, i] - q_pos[i] <= pi:
-                Bin[i] = gain * ((self._q_lim[1, i] - q_pos[i]) - ps) / (pi - ps)
+            if self._q_lim[1, i] - q_ctrl[i] <= pi:
+                Bin[i] = gain * ((self._q_lim[1, i] - q_ctrl[i]) - ps) / (pi - ps)
                 Ain[i, i] = 1
         return Ain, Bin
 

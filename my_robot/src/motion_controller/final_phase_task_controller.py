@@ -6,9 +6,7 @@ class FinalPhaseTaskController:
     def __init__(self):
         super().__init__()
 
-        self._kP = 5.0
-        self._kA = 0.5
-        self._vB = 1.0
+        self._kP = 14.0
 
     def reset(self):
         pass

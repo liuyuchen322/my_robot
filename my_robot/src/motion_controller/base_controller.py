@@ -7,12 +7,15 @@ class BaseController:
         super().__init__()
 
         self._rR = 0.25
-        self._rP = 0.35
+        # FR5 side-grasp needs the chassis to stand slightly closer than the
+        # top-grasp reference, otherwise state2 never closes the last gap.
+        self._rP = 0.28
 
         self._vF = 1.0
 
         self._k_alpha = 4
         self._k_beta = -1.5
+        self._wz_max = 1.5
 
         self._rC = self._rR + self._rP
 
@@ -63,14 +66,12 @@ class BaseController:
         cos_beta = np.dot(n_bc, n_closest)
         beta = np.arcsin(sin_beta)
 
-        d_safe = max(d_bc, 0.05)
-        vB = self._vF * min(1.0, d_bc / 0.2)
-        wB = (self._k_alpha * alpha + self._k_beta * beta) * self._vF / d_safe
-        wB = np.clip(wB, -1.5, 1.5)
+        vB = self._vF
+        wB = (self._k_alpha * alpha + self._k_beta * beta) * self._vF / d_bc
 
         vx = vB
         vy = 0.0
-        wz = wB
+        wz = np.clip(wB, -self._wz_max, self._wz_max)
 
         succeed = False
         if t_radius < self._rC:

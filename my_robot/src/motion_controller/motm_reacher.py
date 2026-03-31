@@ -1,112 +1,97 @@
+import time
+
 import numpy as np
-from scipy.spatial.transform import Rotation
-import modern_robotics as mr
+import qpsolvers as qp
+from qpsolvers.exceptions import SolverError
 
 from ..robot import Robot
 
 
-def get_mapping_from_local_angular_velocity_to_rpy_derivative(rpy_angles: np.ndarray):
-    sx = np.sin(rpy_angles[0])
-    cx = np.cos(rpy_angles[0])
-    cy = np.cos(rpy_angles[1])
-    ty = np.tan(rpy_angles[1])
-
-    M = np.array([
-        [1.0, ty * sx, ty * cx],
-        [0.0, cx, -cx],
-        [0.0, sx / cy, cx / cy]
-    ])
-    return M
-
-
-def get_mapping_from_rpy_derivative_to_local_angular_velocity(rpy_angles: np.ndarray):
-    sx = np.sin(rpy_angles[0])
-    cx = np.cos(rpy_angles[0])
-    sy = np.sin(rpy_angles[1])
-    cy = np.cos(rpy_angles[1])
-
-    M = np.array([
-        [1.0, 0.0, -sy],
-        [0.0, cx, sx * cy],
-        [0.0, -sx, cx * cy]
-    ])
-    return M
-
-
-class MotMReacher:
-    def __init__(self, ts: float, robot: Robot):
+class RedundancyResolutionController:
+    def __init__(self, robot: Robot):
         super().__init__()
 
-        self._ka = 0.5
-        self._ts = ts
+        self._robot = robot
+        self._Y = 0.01
+        self._manip_weight = 0.0
+        self.success = False
 
-        self._robot: Robot = robot
+    def ctrl(self, v_gripper_desired, v_base_desired):
+        n = self._robot.dof
 
-        self._poses = np.zeros(6)
-        self._vels = np.zeros(6)
-        self._accs = np.zeros(6)
+        t_err = max(np.sum(np.abs(v_gripper_desired[:3])), 1e-6)
+        Q = np.eye(n + 6)
+        Q[:n, :n] *= self._Y
+        Q[0, 0] *= 1.0 / t_err
+        Q[1, 1] *= 1.0 / t_err
+        Q[n:, n:] = (2.0 / t_err) * np.eye(6)
 
-    def reset(self, T_bg: np.ndarray):
-        self._poses[:3] = T_bg[:3, 3]
-        self._poses[3:] = Rotation.from_matrix(T_bg[:3, :3]).as_euler('xyz')
-        self._vels[:] *= 0
-        self._accs[:] *= 0
+        q = self._robot.q
+        Aeq = np.c_[self._robot.jacobe(q), np.eye(6)]
+        beq = v_gripper_desired.reshape((6,))
 
-    def ctrl(self, tf, T_bt, v_base_desired):
-        tf = max(float(tf), 0.2)
+        Ain = np.zeros((n + 6, n + 6))
+        bin = np.zeros(n + 6)
+        ps = 0.1
+        pi = 0.9
+        Ain[:n, :n], bin[:n] = self._robot.joint_velocity_damper(q, ps, pi)
 
-        poses1 = np.zeros(6)
-        poses1[:3] = T_bt[:3, 3]
-        poses1[3:] = Rotation.from_matrix(T_bt[:3, :3]).as_euler('xyz')
+        c = np.zeros(n + 6)
+        if self._manip_weight > 0.0:
+            c[2:n] = -self._manip_weight * self._robot.jacobm(q, start=2).reshape((n - 2,))
 
-        for i in range(3):
-            if poses1[3 + i] - self._poses[3 + i] > np.pi:
-                poses1[3 + i] -= 2 * np.pi
-            elif poses1[3 + i] - self._poses[3 + i] < -np.pi:
-                poses1[3 + i] += 2 * np.pi
+        lb = -np.r_[self._robot.qd_lim[:n], 10 * np.ones(6)]
+        ub = np.r_[self._robot.qd_lim[:n], 10 * np.ones(6)]
 
-        for i in range(6):
-            p, v, a = self.plan(self._poses[i], self._vels[i], self._accs[i], poses1[i], tf)
-            self._poses[i] = p
-            self._vels[i] = v
-            self._accs[i] = a
+        lb[0] = ub[0] = v_base_desired[2]
+        lb[1] = ub[1] = v_base_desired[0]
 
-        V = np.zeros(6)
-        V[:3] = Rotation.from_euler('xyz', self._poses[3:]).as_matrix().T @ self._vels[:3]
-        V[3:] = get_mapping_from_rpy_derivative_to_local_angular_velocity(self._poses[3:]) @ self._vels[3:]
+        t_start = time.time()
+        qd = None
+        for solver_name in ('cvxopt', 'highs', 'osqp'):
+            try:
+                qd = qp.solve_qp(
+                    Q, c, Ain, bin, Aeq, beq, lb=lb, ub=ub, solver=solver_name
+                )
+            except (ArithmeticError, ValueError, SolverError):
+                qd = None
+            if qd is not None:
+                break
+        t_end = time.time()
+        solve_time_ms = (t_end - t_start) * 1000.0
 
-        dq = np.zeros(self._robot.dof)
-        dq[0] = v_base_desired[0]   # vx
-        dq[1] = v_base_desired[1]   # vy
-        dq[5] = v_base_desired[2]   # wz
-        Je = self._robot.jacobe(self._robot.q)
-        V[:] += Je @ dq
+        self.success = qd is not None
+        if qd is None:
+            qd = self._fallback_solution(v_gripper_desired, v_base_desired)
+        else:
+            qd = qd[:n]
 
-        return V
+        return qd, self.success, solve_time_ms
 
-    def plan(self, p0, v0, a0, p1, tf):
-        A = np.zeros((6, 6))
-        A[0, 0] = 1.0
-        A[2, 1] = 1.0
-        A[4, 2] = 2.0
-        for i in range(6):
-            A[1, i] = (tf ** i)
-            A[3, i] = i * (tf ** (i - 1))
-            A[5, i] = (i - 1) * i * (tf ** (i - 2))
+    def _fallback_solution(self, v_gripper_desired, v_base_desired):
+        q = self._robot.q
+        jacobe = self._robot.jacobe(q)
 
-        b = np.zeros(6)
-        b[0] = p0
-        b[1] = p1
-        b[2] = v0
-        b[4] = a0
+        base_cols = [0, 1]
+        arm_cols = list(range(2, self._robot.dof))
+        base_jacobian = jacobe[:, base_cols]
+        arm_jacobian = jacobe[:, arm_cols]
 
-        x = np.linalg.inv(A) @ b
-        p = 0
-        v = 0
-        a = 0
-        for i in range(6):
-            p += x[i] * (self._ts ** i)
-            v += x[i] * i * (self._ts ** (i - 1))
-            a += x[i] * (i - 1) * i * (self._ts ** (i - 2))
+        base_cmd = np.array([v_base_desired[2], v_base_desired[0]])
+        base_twist = base_jacobian @ base_cmd
+        residual_twist = v_gripper_desired - base_twist
 
-        return p, v, a
+        damp = 1e-4
+        arm_solution = arm_jacobian.T @ np.linalg.solve(
+            arm_jacobian @ arm_jacobian.T + damp * np.eye(6),
+            residual_twist,
+        )
+
+        qd = np.zeros(self._robot.dof)
+        qd[0] = v_base_desired[2]
+        qd[1] = v_base_desired[0]
+        qd[2:] = arm_solution
+        qd = np.clip(qd, -self._robot.qd_lim[:self._robot.dof], self._robot.qd_lim[:self._robot.dof])
+        qd[0] = v_base_desired[2]
+        qd[1] = v_base_desired[0]
+        return qd
